@@ -129,7 +129,9 @@ def _build_table(data: List[List], col_widths: List, s: Dict,
     for ri, row in enumerate(data):
         new_row = []
         for cell in row:
-            if isinstance(cell, str):
+            if isinstance(cell, Paragraph):
+                new_row.append(cell)
+            elif isinstance(cell, str):
                 style = s["th"] if ri == 0 else s["td"]
                 new_row.append(Paragraph(cell, style))
             elif cell is None:
