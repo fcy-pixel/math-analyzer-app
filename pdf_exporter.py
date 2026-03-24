@@ -38,9 +38,18 @@ _FONT = "Helvetica"
 _FONT_REGISTERED = False
 
 _CJK_CANDIDATES = [
+    # macOS
     ("/System/Library/Fonts/STHeiti Light.ttc", 0),
     ("/System/Library/Fonts/STHeiti Medium.ttc", 0),
     ("/System/Library/Fonts/Hiragino Sans GB.ttc", 0),
+    # Linux / Streamlit Cloud (apt: fonts-wqy-microhei)
+    ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
+    # Linux / Streamlit Cloud (apt: fonts-noto-cjk)
+    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 0),
+    ("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc", 0),
+    # Windows fallback
+    ("C:/Windows/Fonts/msyh.ttc", 0),
+    ("C:/Windows/Fonts/simsun.ttc", 0),
 ]
 
 
