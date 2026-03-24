@@ -721,7 +721,7 @@ if mode == "📝 學生試卷批量分析（新）":
         export_data = {"aggregated": agg, "insights": insights, "grade": s_grade, "notes": s_label}
         st.download_button(
             "📥 下載 JSON 資料",
-            data=json.dumps(export_data, ensure_ascii=False, indent=2),
+            data=json.dumps(export_data, ensure_ascii=False, indent=2).encode("utf-8-sig"),
             file_name=f"student_analysis_{s_grade}_{s_label or 'class'}.json",
             mime="application/json",
         )
@@ -1429,7 +1429,7 @@ with tabs[tab_idx]:
     json_str = json.dumps(results, ensure_ascii=False, indent=2)
     st.download_button(
         label="📥 下載完整 JSON 報告",
-        data=json_str,
+        data=json_str.encode("utf-8-sig"),
         file_name=f"math_analysis_{class_label or 'class'}_{grade}.json",
         mime="application/json",
     )
@@ -1477,7 +1477,7 @@ with tabs[tab_idx]:
     text_report = _build_text_report(results, class_label, grade)
     st.download_button(
         label="📄 下載文字報告 (.txt)",
-        data=text_report,
+        data=text_report.encode("utf-8-sig"),
         file_name=f"math_report_{class_label or 'class'}_{grade}.txt",
         mime="text/plain",
     )
