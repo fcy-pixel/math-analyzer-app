@@ -10,3 +10,5 @@ python-dotenv>=1.0.0
 reportlab>=4.0.0
 kaleido>=1.0.0
 qrcode[pil]>=7.4.2
+firebase-admin>=6.4.0
+opencv-python-headless>=4.9.0
