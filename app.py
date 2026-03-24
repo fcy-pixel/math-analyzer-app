@@ -220,6 +220,8 @@ if mode == "📝 學生試卷批量分析（新）":
         st.session_state.pop("student_results", None)
         st.session_state.pop("class_agg", None)
         st.session_state.pop("class_insights", None)
+        st.session_state.pop("s_pdf_bytes", None)
+        st.session_state.pop("s_pdf_stem", None)
 
         analyzer = MathAnalyzer(api_key)
         processor = FileProcessor()
@@ -696,18 +698,23 @@ if mode == "📝 學生試卷批量分析（新）":
             with st.spinner("正在生成 PDF，請稍候…"):
                 try:
                     pdf_bytes_out = build_student_report(agg, insights, s_grade, s_label)
-                    file_stem = f"{s_grade}_{s_label or 'class'}"
-                    st.download_button(
-                        "⬇️ 點擊下載 PDF 報告",
-                        data=pdf_bytes_out,
-                        file_name=f"student_report_{file_stem}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True,
-                    )
-                    st.success(f"✅ PDF 已生成 ({len(pdf_bytes_out):,} bytes)")
+                    st.session_state["s_pdf_bytes"] = pdf_bytes_out
+                    st.session_state["s_pdf_stem"] = f"{s_grade}_{s_label or 'class'}"
                 except Exception as e:
                     st.error(f"❌ PDF 生成失敗：{e}")
                     st.exception(e)
+
+        if st.session_state.get("s_pdf_bytes"):
+            file_stem = st.session_state.get("s_pdf_stem", "report")
+            st.download_button(
+                "⬇️ 點擊下載 PDF 報告",
+                data=st.session_state["s_pdf_bytes"],
+                file_name=f"student_report_{file_stem}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="s_pdf_dl",
+            )
+            st.success(f"✅ PDF 已生成 ({len(st.session_state['s_pdf_bytes']):,} bytes)")
 
         st.markdown("---")
         st.markdown("#### 📂 JSON 原始資料")
@@ -846,6 +853,8 @@ if analyse_btn:
         st.session_state["results"] = results
         st.session_state["grade"] = grade
         st.session_state["class_label"] = class_label
+        st.session_state.pop("aqp_pdf_bytes", None)
+        st.session_state.pop("aqp_pdf_stem", None)
 
     except Exception as exc:
         progress.empty()
@@ -1396,18 +1405,22 @@ with tabs[tab_idx]:
         with st.spinner("正在生成 PDF，請稍候…"):
             try:
                 pdf_bytes = build_pdf(results, grade, class_label)
-                file_stem = f"{grade}_{class_label or 'all'}"
-                st.download_button(
-                    label="⬇️ 點擊下載 PDF 報告",
-                    data=pdf_bytes,
-                    file_name=f"math_report_{file_stem}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
-                st.success(f"✅ PDF 已生成，共 {len(pdf_bytes):,} bytes")
+                st.session_state["aqp_pdf_bytes"] = pdf_bytes
+                st.session_state["aqp_pdf_stem"] = f"{grade}_{class_label or 'all'}"
             except Exception as e:
                 st.error(f"❌ PDF 生成失敗：{e}")
                 st.exception(e)
+
+    if st.session_state.get("aqp_pdf_bytes"):
+        file_stem = st.session_state.get("aqp_pdf_stem", "report")
+        st.download_button(
+            label="⬇️ 點擊下載 PDF 報告",
+            data=st.session_state["aqp_pdf_bytes"],
+            file_name=f"math_report_{file_stem}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+        st.success(f"✅ PDF 已生成，共 {len(st.session_state['aqp_pdf_bytes']):,} bytes")
 
     st.markdown("---")
 
