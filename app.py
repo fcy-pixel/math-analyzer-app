@@ -23,6 +23,7 @@ from file_processor import (
 )
 from html_exporter import build_student_html_report
 from pdf_exporter import build_pdf, build_student_report
+from practice_html import build_practice_worksheets_html
 
 # ---------------------------------------------------------------------------
 # Page configuration
@@ -765,10 +766,9 @@ if mode == "📝 學生試卷批量分析（新）":
     # ── Tab 7: Practice Question Generator ─────────────────────────
     with rtabs[7]:
         st.markdown("### 📝 弱點針對練習 — 因材施教，生成針對性練習題")
-        st.caption("根據每位學生的答錯題目和弱點，由 AI 自動生成相似題型的練習題，幫助學生鞏固薄弱環節。")
+        st.caption("根據每位學生的答錯題目和弱點，由 AI 自動生成相似題型的練習題，可一鍵列印全班練習卷（每人獨立一頁 A4）。")
 
         student_results = agg.get("student_results", [])
-        # Filter students who have wrong answers
         students_with_errors = []
         for s in student_results:
             if s.get("parse_error"):
@@ -780,8 +780,18 @@ if mode == "📝 學生試卷批量分析（新）":
         if not students_with_errors:
             st.success("🎉 所有學生都全對！無需生成弱點練習題。")
         else:
-            col_sel1, col_sel2, col_sel3 = st.columns([3, 1, 1])
-            with col_sel1:
+            # ── Common settings ───────────────────────────────────────
+            cfg_c1, cfg_c2 = st.columns(2)
+            with cfg_c1:
+                num_q = st.number_input("每人題目數量", min_value=1, max_value=15, value=5, key="pq_num")
+            with cfg_c2:
+                difficulty = st.selectbox("難度", ["簡單", "適中", "進階"], index=1, key="pq_diff")
+
+            # ── Tabs: individual vs batch ─────────────────────────────
+            mode_tab1, mode_tab2 = st.tabs(["👤 個別生成", "📋 批量生成全班"])
+
+            # ── Individual mode ───────────────────────────────────────
+            with mode_tab1:
                 student_options = {
                     f"{s.get('student_name', '未知')}　（答錯 {len(w)} 題，得分率 {s.get('percentage', 0):.0f}%）": i
                     for i, (s, w) in enumerate(students_with_errors)
@@ -789,101 +799,236 @@ if mode == "📝 學生試卷批量分析（新）":
                 selected_label = st.selectbox(
                     "選擇學生", options=list(student_options.keys()), key="pq_student_sel"
                 )
-            with col_sel2:
-                num_q = st.number_input("題目數量", min_value=1, max_value=15, value=5, key="pq_num")
-            with col_sel3:
-                difficulty = st.selectbox("難度", ["簡單", "適中", "進階"], index=1, key="pq_diff")
 
-            sel_idx = student_options[selected_label]
-            sel_student, sel_wrong = students_with_errors[sel_idx]
-            sel_name = sel_student.get("student_name", "未知")
+                sel_idx = student_options[selected_label]
+                sel_student, sel_wrong = students_with_errors[sel_idx]
+                sel_name = sel_student.get("student_name", "未知")
 
-            # Show the student's wrong questions summary
-            with st.expander(f"📋 {sel_name} 的答錯題目（共 {len(sel_wrong)} 題）", expanded=False):
-                wrong_rows = []
-                for q in sel_wrong:
-                    wrong_rows.append({
-                        "題目": q.get("question_ref", ""),
-                        "主題": q.get("topic", ""),
-                        "範疇": q.get("strand", ""),
-                        "學生答案": q.get("student_answer", "—"),
-                        "正確答案": q.get("correct_answer", "—"),
-                        "錯誤類型": q.get("error_type", ""),
-                    })
-                st.dataframe(pd.DataFrame(wrong_rows), use_container_width=True, hide_index=True)
+                with st.expander(f"📋 {sel_name} 的答錯題目（共 {len(sel_wrong)} 題）", expanded=False):
+                    wrong_rows = []
+                    for q in sel_wrong:
+                        wrong_rows.append({
+                            "題目": q.get("question_ref", ""),
+                            "主題": q.get("topic", ""),
+                            "範疇": q.get("strand", ""),
+                            "學生答案": q.get("student_answer", "—"),
+                            "正確答案": q.get("correct_answer", "—"),
+                            "錯誤類型": q.get("error_type", ""),
+                        })
+                    st.dataframe(pd.DataFrame(wrong_rows), use_container_width=True, hide_index=True)
 
-            pq_state_key = f"pq_result_{sel_name}"
+                pq_state_key = f"pq_result_{sel_name}"
 
-            if st.button(
-                f"🤖 為 {sel_name} 生成 {num_q} 道針對練習題",
-                use_container_width=True,
-                key="pq_gen_btn",
-            ):
-                with st.spinner(f"AI 正在為 {sel_name} 設計練習題…"):
-                    try:
-                        pq_analyzer = MathAnalyzer(api_key)
-                        pq_result = pq_analyzer.generate_practice_questions(
-                            student_name=sel_name,
-                            grade=s_grade,
-                            weak_questions=sel_wrong,
-                            num_questions=num_q,
-                            difficulty=difficulty,
+                if st.button(
+                    f"🤖 為 {sel_name} 生成 {num_q} 道針對練習題",
+                    use_container_width=True,
+                    key="pq_gen_btn",
+                ):
+                    with st.spinner(f"AI 正在為 {sel_name} 設計練習題…"):
+                        try:
+                            pq_analyzer = MathAnalyzer(api_key)
+                            pq_result = pq_analyzer.generate_practice_questions(
+                                student_name=sel_name,
+                                grade=s_grade,
+                                weak_questions=sel_wrong,
+                                num_questions=num_q,
+                                difficulty=difficulty,
+                            )
+                            st.session_state[pq_state_key] = pq_result
+                        except Exception as e:
+                            st.error(f"❌ 生成失敗：{e}")
+                            st.exception(e)
+
+                pq_result = st.session_state.get(pq_state_key)
+                if pq_result:
+                    st.markdown("---")
+                    ws = pq_result.get("weakness_summary", "")
+                    if ws:
+                        st.info(f"**弱點概述：** {ws}")
+
+                    questions = pq_result.get("practice_questions", [])
+                    for q in questions:
+                        qn = q.get("question_number", "")
+                        qtype = q.get("question_type", "")
+                        target = q.get("targeted_weakness", "")
+                        with st.expander(
+                            f"第 {qn} 題（{qtype}）— 針對：{target}", expanded=True
+                        ):
+                            st.markdown(
+                                f"**範疇：** {q.get('strand', '')}　|　**主題：** {q.get('topic', '')}"
+                            )
+                            st.markdown("---")
+                            st.markdown(f"**📖 題目：**\n\n{q.get('question_text', '')}")
+                            hint = q.get("hints", "")
+                            if hint:
+                                st.caption(f"💡 提示：{hint}")
+                            with st.expander("🔑 查看答案及解題步驟", expanded=False):
+                                st.markdown(f"**答案：** {q.get('answer', '')}")
+                                steps = q.get("solution_steps", [])
+                                if steps:
+                                    st.markdown("**解題步驟：**")
+                                    for si, step in enumerate(steps, 1):
+                                        st.markdown(f"{si}. {step}")
+                                expl = q.get("explanation", "")
+                                if expl:
+                                    st.caption(f"📌 設計理由：{expl}")
+
+                    tips = pq_result.get("study_tips", [])
+                    if tips:
+                        st.markdown("### 📚 學習建議")
+                        for tip in tips:
+                            st.markdown(f"- {tip}")
+
+                    # ── HTML download buttons ─────────────────────────
+                    st.markdown("---")
+                    st.markdown("#### 🖨️ 下載練習題（可直接列印）")
+                    dl_c1, dl_c2 = st.columns(2)
+                    with dl_c1:
+                        html_student = build_practice_worksheets_html(
+                            [pq_result], grade=s_grade, show_answers=False
                         )
-                        st.session_state[pq_state_key] = pq_result
-                    except Exception as e:
-                        st.error(f"❌ 生成失敗：{e}")
-                        st.exception(e)
+                        st.download_button(
+                            f"📄 學生版（A4，無答案）",
+                            data=html_student.encode("utf-8"),
+                            file_name=f"練習題_{sel_name}_{s_grade}_學生版.html",
+                            mime="text/html",
+                            key="pq_dl_student",
+                            use_container_width=True,
+                        )
+                    with dl_c2:
+                        html_teacher = build_practice_worksheets_html(
+                            [pq_result], grade=s_grade, show_answers=True
+                        )
+                        st.download_button(
+                            f"📋 老師版（含答案及解題步驟）",
+                            data=html_teacher.encode("utf-8"),
+                            file_name=f"練習題_{sel_name}_{s_grade}_老師版.html",
+                            mime="text/html",
+                            key="pq_dl_teacher",
+                            use_container_width=True,
+                        )
+                    st.caption("💡 下載後在瀏覽器開啟，按 Ctrl+P（Mac: Cmd+P）或點頁面上的「🖨️ 列印」鍵即可列印。")
 
-            # Display results
-            pq_result = st.session_state.get(pq_state_key)
-            if pq_result:
-                st.markdown("---")
-                ws = pq_result.get("weakness_summary", "")
-                if ws:
-                    st.info(f"**弱點概述：** {ws}")
-
-                questions = pq_result.get("practice_questions", [])
-                for q in questions:
-                    qn = q.get("question_number", "")
-                    qtype = q.get("question_type", "")
-                    target = q.get("targeted_weakness", "")
-                    header = f"題 {qn}（{qtype}）— 針對：{target}"
-                    with st.expander(header, expanded=True):
-                        st.markdown(f"**範疇：** {q.get('strand', '')}　|　**主題：** {q.get('topic', '')}")
-                        st.markdown("---")
-                        st.markdown(f"**📖 題目：**\n\n{q.get('question_text', '')}")
-                        hint = q.get("hints", "")
-                        if hint:
-                            st.caption(f"💡 提示：{hint}")
-
-                        # Answer and solution behind a toggle
-                        with st.expander("🔑 查看答案及解題步驟", expanded=False):
-                            st.markdown(f"**答案：** {q.get('answer', '')}")
-                            steps = q.get("solution_steps", [])
-                            if steps:
-                                st.markdown("**解題步驟：**")
-                                for si, step in enumerate(steps, 1):
-                                    st.markdown(f"{si}. {step}")
-                            expl = q.get("explanation", "")
-                            if expl:
-                                st.caption(f"📌 設計理由：{expl}")
-
-                tips = pq_result.get("study_tips", [])
-                if tips:
-                    st.markdown("### 📚 學習建議")
-                    for tip in tips:
-                        st.markdown(f"- {tip}")
-
-                # Export practice sheet
-                st.markdown("---")
-                pq_export = json.dumps(pq_result, ensure_ascii=False, indent=2)
-                st.download_button(
-                    f"📥 下載 {sel_name} 的練習題 (JSON)",
-                    data=pq_export.encode("utf-8-sig"),
-                    file_name=f"practice_{sel_name}_{s_grade}.json",
-                    mime="application/json",
-                    key="pq_download",
+            # ── Batch mode ────────────────────────────────────────────
+            with mode_tab2:
+                total_err = len(students_with_errors)
+                st.info(
+                    f"共 **{total_err}** 位學生有答錯題目。按下按鈕後，AI 會依次為每位學生生成練習題，"
+                    f"完成後可一鍵下載全班練習題 HTML，直接送印。"
                 )
+
+                # Show student list
+                with st.expander(f"📋 需要生成練習題的學生名單（{total_err} 人）", expanded=False):
+                    name_rows = [
+                        {
+                            "學生": s.get("student_name", "未知"),
+                            "答錯題數": len(w),
+                            "得分率": f"{s.get('percentage', 0):.0f}%",
+                        }
+                        for s, w in students_with_errors
+                    ]
+                    st.dataframe(pd.DataFrame(name_rows), use_container_width=True, hide_index=True)
+
+                batch_key = "pq_batch_results"
+                batch_running_key = "pq_batch_done"
+
+                if st.button(
+                    f"🚀 為全部 {total_err} 位學生生成練習題（每人 {num_q} 題）",
+                    use_container_width=True,
+                    type="primary",
+                    key="pq_batch_btn",
+                ):
+                    batch_results = []
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    pq_analyzer = MathAnalyzer(api_key)
+                    errors_log = []
+
+                    for idx, (s_data, s_wrong) in enumerate(students_with_errors):
+                        sname = s_data.get("student_name", f"學生{idx+1}")
+                        status_text.info(
+                            f"⏳ 正在為 **{sname}** 生成練習題… （{idx+1} / {total_err}）"
+                        )
+                        try:
+                            result = pq_analyzer.generate_practice_questions(
+                                student_name=sname,
+                                grade=s_grade,
+                                weak_questions=s_wrong,
+                                num_questions=num_q,
+                                difficulty=difficulty,
+                            )
+                            batch_results.append(result)
+                        except Exception as e:
+                            errors_log.append(f"{sname}: {e}")
+                            batch_results.append({
+                                "student_name": sname,
+                                "parse_error": True,
+                                "error": str(e),
+                            })
+                        progress_bar.progress((idx + 1) / total_err)
+
+                    st.session_state[batch_key] = batch_results
+                    st.session_state[batch_running_key] = True
+                    status_text.success(
+                        f"✅ 已完成全部 {total_err} 位學生的練習題生成！"
+                        + (f"（{len(errors_log)} 位生成失敗）" if errors_log else "")
+                    )
+                    if errors_log:
+                        for err in errors_log:
+                            st.warning(f"⚠️ {err}")
+
+                # Show download buttons once batch is done
+                batch_results = st.session_state.get(batch_key, [])
+                if batch_results:
+                    ok_results = [r for r in batch_results if not r.get("parse_error")]
+                    st.markdown(f"#### 🖨️ 下載全班練習題（{len(ok_results)} 位學生）")
+                    st.caption(
+                        "每位學生獨立一頁 A4。瀏覽器開啟後點「🖨️ 列印全部」即可一次列印全班。"
+                    )
+
+                    dl_b1, dl_b2 = st.columns(2)
+                    with dl_b1:
+                        html_all_student = build_practice_worksheets_html(
+                            ok_results, grade=s_grade, show_answers=False
+                        )
+                        st.download_button(
+                            f"📄 全班學生版（{len(ok_results)} 頁，無答案）",
+                            data=html_all_student.encode("utf-8"),
+                            file_name=f"全班練習題_{s_grade}_學生版.html",
+                            mime="text/html",
+                            key="pq_batch_dl_student",
+                            use_container_width=True,
+                            type="primary",
+                        )
+                    with dl_b2:
+                        html_all_teacher = build_practice_worksheets_html(
+                            ok_results, grade=s_grade, show_answers=True
+                        )
+                        st.download_button(
+                            f"📋 全班老師版（{len(ok_results)} 頁，含答案）",
+                            data=html_all_teacher.encode("utf-8"),
+                            file_name=f"全班練習題_{s_grade}_老師版.html",
+                            mime="text/html",
+                            key="pq_batch_dl_teacher",
+                            use_container_width=True,
+                        )
+
+                    # Per-student preview
+                    st.markdown("---")
+                    st.markdown("#### 📋 各學生練習題預覽")
+                    for r in ok_results:
+                        sname = r.get("student_name", "學生")
+                        qs = r.get("practice_questions", [])
+                        ws = r.get("weakness_summary", "")
+                        with st.expander(f"📄 {sname}（{len(qs)} 題）", expanded=False):
+                            if ws:
+                                st.info(f"弱點概述：{ws}")
+                            for q in qs:
+                                st.markdown(
+                                    f"**第 {q.get('question_number')} 題** "
+                                    f"（{q.get('question_type', '')}）— "
+                                    f"{q.get('question_text', '')[:80]}…"
+                                )
 
     # ── Tab 8: Export ─────────────────────────────────────────────────
     with rtabs[8]:
