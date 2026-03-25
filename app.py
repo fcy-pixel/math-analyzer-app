@@ -1,5 +1,5 @@
 """
-小學數學學生表現分析系統
+中華基督教會基慈小學 · 數學學生表現分析系統
 Streamlit web application — powered by Qwen AI
 """
 
@@ -29,7 +29,7 @@ from practice_html import build_practice_worksheets_html
 # Page configuration
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="小學數學學生表現分析系統",
+    page_title="中華基督教會基慈小學 · 數學學生表現分析系統",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -73,7 +73,7 @@ st.markdown(
 st.markdown(
     """
 <div class="main-header">
-  <h1>📊 小學數學學生表現分析系統</h1>
+  <h1>📊 中華基督教會基慈小學 · 數學學生表現分析系統</h1>
   <p>上傳全班學生試卷 PDF · AI 逐份批改 · 自動生成全班弱點診斷報告 · 基於香港小學數學課程綱要</p>
 </div>
 """,
