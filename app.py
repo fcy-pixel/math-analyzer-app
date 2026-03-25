@@ -353,6 +353,7 @@ if mode == "📝 學生試卷批量分析（新）":
     rtabs = st.tabs([
         "📋 整體概覽",
         "🏅 學生成績",
+        "✏️ 自動批改",
         "📝 逐題分析",
         "🔥 弱點熱圖",
         "🎯 弱點診斷",
@@ -480,8 +481,78 @@ if mode == "📝 學生試卷批量分析（新）":
             fig.update_layout(height=max(300, 22 * len(df_rank)), margin=dict(l=120))
             st.plotly_chart(fig, use_container_width=True)
 
-    # ── Tab 2: Per-question stats ─────────────────────────────────────
+    # ── Tab 2: Auto-marking (wrong answers per student) ──────────────
     with rtabs[2]:
+        student_results = agg.get("student_results", [])
+        q_stats = agg.get("question_stats", [])
+        if student_results:
+            st.markdown("### ✏️ 自動批改 — 各學生答錯題目")
+            st.caption("只列出每位學生答錯的題目，方便老師用紅筆在紙本工作紙上批改。")
+
+            for student in student_results:
+                name = student.get("student_name", "未知")
+                if student.get("parse_error"):
+                    st.warning(f"**{name}** — 分析失敗，無法取得答題結果")
+                    continue
+
+                q_results = student.get("question_results", [])
+                wrong = [q for q in q_results if q.get("is_correct") is False]
+
+                pct = student.get("percentage", 0)
+                total_q = len(q_results)
+                wrong_count = len(wrong)
+                correct_count = total_q - wrong_count
+
+                if not wrong:
+                    st.success(f"**{name}** — ✅ 全部答對（{total_q}/{total_q}）")
+                    continue
+
+                color = "red" if pct < 55 else "orange" if pct < 70 else "blue"
+                with st.expander(
+                    f"❌ {name}　—　答錯 {wrong_count} 題 / 共 {total_q} 題　（得分率 {pct:.0f}%）",
+                    expanded=(wrong_count >= 3),
+                ):
+                    rows = []
+                    for q in wrong:
+                        ref = q.get("question_ref", "")
+                        rows.append({
+                            "題目": ref,
+                            "考核主題": q.get("topic", ""),
+                            "學生答案": q.get("student_answer", "—"),
+                            "正確答案": q.get("correct_answer", "—"),
+                            "得分": f"{q.get('marks_awarded', 0)} / {q.get('marks_possible', '')}",
+                            "錯誤類型": q.get("error_type", "") or "",
+                            "錯誤說明": q.get("error_description", "") or "",
+                        })
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+            # Summary table: student × wrong question quick reference
+            st.markdown("---")
+            st.markdown("### 📋 全班答錯題目一覽表")
+            st.caption("每格顯示 ❌ 代表該學生答錯該題，空白代表答對或未作答。")
+            all_refs = [q["question_ref"] for q in q_stats] if q_stats else []
+            if all_refs:
+                summary_rows = []
+                for student in student_results:
+                    name = student.get("student_name", "未知")
+                    if student.get("parse_error"):
+                        continue
+                    q_map = {
+                        str(q.get("question_ref", "")): q.get("is_correct")
+                        for q in student.get("question_results", [])
+                    }
+                    row = {"學生": name}
+                    for ref in all_refs:
+                        val = q_map.get(str(ref))
+                        row[ref] = "❌" if val is False else ""
+                    summary_rows.append(row)
+                if summary_rows:
+                    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("尚未有學生分析結果。")
+
+    # ── Tab 3: Per-question stats ─────────────────────────────────────
+    with rtabs[3]:
         q_stats = agg.get("question_stats", [])
         if q_stats:
             st.markdown(f"### 📝 逐題全班正確率（共 {len(q_stats)} 題）")
@@ -518,8 +589,8 @@ if mode == "📝 學生試卷批量分析（新）":
                           annotation_text="60% 基準線")
             st.plotly_chart(fig, use_container_width=True)
 
-    # ── Tab 3: Heatmap ────────────────────────────────────────────────
-    with rtabs[3]:
+    # ── Tab 4: Heatmap ────────────────────────────────────────────────
+    with rtabs[4]:
         q_stats = agg.get("question_stats", [])
         student_results = agg.get("student_results", [])
         if q_stats and student_results:
@@ -581,8 +652,8 @@ if mode == "📝 學生試卷批量分析（新）":
                     color = "🔴" if rate < 40 else "🟡" if rate < 60 else "🟢"
                     rate_cols[i % len(rate_cols)].metric(ref, f"{color} {rate}%")
 
-    # ── Tab 4: Weak area diagnosis ────────────────────────────────────
-    with rtabs[4]:
+    # ── Tab 5: Weak area diagnosis ────────────────────────────────────
+    with rtabs[5]:
         weak_q = agg.get("weak_questions", [])
         strand_stats = agg.get("strand_stats", [])
 
@@ -659,8 +730,8 @@ if mode == "📝 學生試卷批量分析（新）":
                     st.markdown("**🔢 程序性錯誤**")
                     st.markdown(et.get("procedural", "—"))
 
-    # ── Tab 5: Teaching recommendations ──────────────────────────────
-    with rtabs[5]:
+    # ── Tab 6: Teaching recommendations ──────────────────────────────
+    with rtabs[6]:
         if insights and not insights.get("parse_error"):
             recs = insights.get("teaching_recommendations", [])
             if recs:
@@ -689,8 +760,8 @@ if mode == "📝 學生試卷批量分析（新）":
         else:
             st.info("教學建議需要先完成AI分析才能顯示。")
 
-    # ── Tab 6: Export ─────────────────────────────────────────────────
-    with rtabs[6]:
+    # ── Tab 7: Export ─────────────────────────────────────────────────
+    with rtabs[7]:
         st.markdown("### 📥 匯出分析報告")
 
         st.markdown("#### 📄 PDF 報告（含圖表，支援中文）")
