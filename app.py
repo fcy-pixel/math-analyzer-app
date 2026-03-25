@@ -821,7 +821,8 @@ if mode == "📝 學生試卷批量分析（新）":
             ):
                 with st.spinner(f"AI 正在為 {sel_name} 設計練習題…"):
                     try:
-                        pq_result = analyzer.generate_practice_questions(
+                        pq_analyzer = MathAnalyzer(api_key)
+                        pq_result = pq_analyzer.generate_practice_questions(
                             student_name=sel_name,
                             grade=s_grade,
                             weak_questions=sel_wrong,
