@@ -716,6 +716,88 @@ class MathAnalyzer:
         )
         return self._parse_json(raw)
 
+    # ------------------------------------------------------------------
+    # 7. Generate practice questions targeting a student's weak areas
+    # ------------------------------------------------------------------
+
+    def generate_practice_questions(
+        self,
+        student_name: str,
+        grade: str,
+        weak_questions: List[Dict],
+        num_questions: int = 5,
+        difficulty: str = "適中",
+    ) -> Dict:
+        """
+        Generate practice questions that target a specific student's
+        weak topics / error types, based on their wrong answers.
+
+        Parameters
+        ----------
+        student_name : str
+            Student display name.
+        grade : str
+            e.g. "P4"
+        weak_questions : list[dict]
+            Each dict should have: question_ref, topic, strand,
+            correct_answer, student_answer, error_type, error_description,
+            marks_possible.
+        num_questions : int
+            How many new practice questions to generate.
+        difficulty : str
+            "簡單" / "適中" / "進階"
+        """
+        curriculum_info = get_grade_curriculum(grade)
+
+        weak_summary = json.dumps(weak_questions, ensure_ascii=False, indent=2)
+
+        prompt = f"""你是一位經驗豐富的香港小學數學科老師，正在為 {grade} 年級的學生 {student_name} 設計針對性練習題。
+
+以下是該學生在測驗中答錯的題目，包括錯誤類型和具體錯誤描述：
+
+{weak_summary}
+
+香港 {grade} 年級數學課程綱要：
+{curriculum_info}
+
+請根據該學生的弱點，生成 {num_questions} 道針對性練習題，要求：
+1. 每道題必須針對該學生的某個特定弱點或錯誤類型
+2. 題目難度：{difficulty}（在該年級範圍內）
+3. 題目類型需多樣化（計算題、應用題、填充題等）
+4. 每道題附有詳細解題步驟和答案
+5. 每道題說明針對哪個弱點，以及為什麼這道題能幫助學生改善
+6. 題目要貼近香港小學數學課程和日常生活情境
+
+只輸出純JSON（不加markdown代碼塊）：
+{{
+  "student_name": "{student_name}",
+  "grade": "{grade}",
+  "weakness_summary": "該學生主要弱點概述（2-3句）",
+  "practice_questions": [
+    {{
+      "question_number": 1,
+      "targeted_weakness": "針對的弱點（對應原錯題）",
+      "strand": "課程範疇",
+      "topic": "具體主題",
+      "question_type": "題目類型（計算題/應用題/填充題/選擇題）",
+      "question_text": "完整題目文字（可包含多個小題）",
+      "hints": "給學生的提示（選填）",
+      "solution_steps": ["步驟1", "步驟2", "步驟3"],
+      "answer": "正確答案",
+      "explanation": "為什麼這道題能幫助改善該弱點"
+    }}
+  ],
+  "study_tips": ["學習建議1", "學習建議2", "學習建議3"]
+}}"""
+
+        raw = self._text(
+            prompt,
+            "你是資深香港小學數學教師，精通因材施教、針對學生弱點設計練習題。"
+            "你熟悉香港課程發展議會《數學課程指引》（2017），"
+            "能設計符合課程要求且貼近學生生活的數學練習題。",
+        )
+        return self._parse_json(raw)
+
     def _text(self, prompt: str, system_msg: str = "") -> str:
         messages = []
         if system_msg:

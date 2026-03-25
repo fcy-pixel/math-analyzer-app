@@ -359,7 +359,8 @@ if mode == "📝 學生試卷批量分析（新）":
         "🔥 弱點熱圖",
         "🎯 弱點診斷",
         "💡 教學建議",
-        "📥 匯出報告",
+        "� 弱點練習",
+        "�📥 匯出報告",
     ])
 
     # ── Tab 0: Overview ───────────────────────────────────────────────
@@ -761,8 +762,130 @@ if mode == "📝 學生試卷批量分析（新）":
         else:
             st.info("教學建議需要先完成AI分析才能顯示。")
 
-    # ── Tab 7: Export ─────────────────────────────────────────────────
+    # ── Tab 7: Practice Question Generator ─────────────────────────
     with rtabs[7]:
+        st.markdown("### 📝 弱點針對練習 — 因材施教，生成針對性練習題")
+        st.caption("根據每位學生的答錯題目和弱點，由 AI 自動生成相似題型的練習題，幫助學生鞏固薄弱環節。")
+
+        student_results = agg.get("student_results", [])
+        # Filter students who have wrong answers
+        students_with_errors = []
+        for s in student_results:
+            if s.get("parse_error"):
+                continue
+            wrong = [q for q in s.get("question_results", []) if q.get("is_correct") is False]
+            if wrong:
+                students_with_errors.append((s, wrong))
+
+        if not students_with_errors:
+            st.success("🎉 所有學生都全對！無需生成弱點練習題。")
+        else:
+            col_sel1, col_sel2, col_sel3 = st.columns([3, 1, 1])
+            with col_sel1:
+                student_options = {
+                    f"{s.get('student_name', '未知')}　（答錯 {len(w)} 題，得分率 {s.get('percentage', 0):.0f}%）": i
+                    for i, (s, w) in enumerate(students_with_errors)
+                }
+                selected_label = st.selectbox(
+                    "選擇學生", options=list(student_options.keys()), key="pq_student_sel"
+                )
+            with col_sel2:
+                num_q = st.number_input("題目數量", min_value=1, max_value=15, value=5, key="pq_num")
+            with col_sel3:
+                difficulty = st.selectbox("難度", ["簡單", "適中", "進階"], index=1, key="pq_diff")
+
+            sel_idx = student_options[selected_label]
+            sel_student, sel_wrong = students_with_errors[sel_idx]
+            sel_name = sel_student.get("student_name", "未知")
+
+            # Show the student's wrong questions summary
+            with st.expander(f"📋 {sel_name} 的答錯題目（共 {len(sel_wrong)} 題）", expanded=False):
+                wrong_rows = []
+                for q in sel_wrong:
+                    wrong_rows.append({
+                        "題目": q.get("question_ref", ""),
+                        "主題": q.get("topic", ""),
+                        "範疇": q.get("strand", ""),
+                        "學生答案": q.get("student_answer", "—"),
+                        "正確答案": q.get("correct_answer", "—"),
+                        "錯誤類型": q.get("error_type", ""),
+                    })
+                st.dataframe(pd.DataFrame(wrong_rows), use_container_width=True, hide_index=True)
+
+            pq_state_key = f"pq_result_{sel_name}"
+
+            if st.button(
+                f"🤖 為 {sel_name} 生成 {num_q} 道針對練習題",
+                use_container_width=True,
+                key="pq_gen_btn",
+            ):
+                with st.spinner(f"AI 正在為 {sel_name} 設計練習題…"):
+                    try:
+                        pq_result = analyzer.generate_practice_questions(
+                            student_name=sel_name,
+                            grade=s_grade,
+                            weak_questions=sel_wrong,
+                            num_questions=num_q,
+                            difficulty=difficulty,
+                        )
+                        st.session_state[pq_state_key] = pq_result
+                    except Exception as e:
+                        st.error(f"❌ 生成失敗：{e}")
+                        st.exception(e)
+
+            # Display results
+            pq_result = st.session_state.get(pq_state_key)
+            if pq_result:
+                st.markdown("---")
+                ws = pq_result.get("weakness_summary", "")
+                if ws:
+                    st.info(f"**弱點概述：** {ws}")
+
+                questions = pq_result.get("practice_questions", [])
+                for q in questions:
+                    qn = q.get("question_number", "")
+                    qtype = q.get("question_type", "")
+                    target = q.get("targeted_weakness", "")
+                    header = f"題 {qn}（{qtype}）— 針對：{target}"
+                    with st.expander(header, expanded=True):
+                        st.markdown(f"**範疇：** {q.get('strand', '')}　|　**主題：** {q.get('topic', '')}")
+                        st.markdown("---")
+                        st.markdown(f"**📖 題目：**\n\n{q.get('question_text', '')}")
+                        hint = q.get("hints", "")
+                        if hint:
+                            st.caption(f"💡 提示：{hint}")
+
+                        # Answer and solution behind a toggle
+                        with st.expander("🔑 查看答案及解題步驟", expanded=False):
+                            st.markdown(f"**答案：** {q.get('answer', '')}")
+                            steps = q.get("solution_steps", [])
+                            if steps:
+                                st.markdown("**解題步驟：**")
+                                for si, step in enumerate(steps, 1):
+                                    st.markdown(f"{si}. {step}")
+                            expl = q.get("explanation", "")
+                            if expl:
+                                st.caption(f"📌 設計理由：{expl}")
+
+                tips = pq_result.get("study_tips", [])
+                if tips:
+                    st.markdown("### 📚 學習建議")
+                    for tip in tips:
+                        st.markdown(f"- {tip}")
+
+                # Export practice sheet
+                st.markdown("---")
+                pq_export = json.dumps(pq_result, ensure_ascii=False, indent=2)
+                st.download_button(
+                    f"📥 下載 {sel_name} 的練習題 (JSON)",
+                    data=pq_export.encode("utf-8-sig"),
+                    file_name=f"practice_{sel_name}_{s_grade}.json",
+                    mime="application/json",
+                    key="pq_download",
+                )
+
+    # ── Tab 8: Export ─────────────────────────────────────────────────
+    with rtabs[8]:
         st.markdown("### 📥 匯出分析報告")
 
         st.markdown("#### 🌐 HTML 互動報告（完整還原分析介面）")
