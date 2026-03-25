@@ -21,6 +21,7 @@ from file_processor import (
     get_pdf_page_count,
     split_student_papers,
 )
+from html_exporter import build_student_html_report
 from pdf_exporter import build_pdf, build_student_report
 
 # ---------------------------------------------------------------------------
@@ -222,6 +223,8 @@ if mode == "📝 學生試卷批量分析（新）":
         st.session_state.pop("class_insights", None)
         st.session_state.pop("s_pdf_bytes", None)
         st.session_state.pop("s_pdf_stem", None)
+        st.session_state.pop("s_html_bytes", None)
+        st.session_state.pop("s_html_stem", None)
 
         analyzer = MathAnalyzer(api_key)
         processor = FileProcessor()
@@ -786,6 +789,31 @@ if mode == "📝 學生試卷批量分析（新）":
                 key="s_pdf_dl",
             )
             st.success(f"✅ PDF 已生成 ({len(st.session_state['s_pdf_bytes']):,} bytes)")
+
+        st.markdown("---")
+        st.markdown("#### 🌐 HTML 互動報告（完整還原分析介面）")
+        st.caption("匯出為 HTML 網頁檔案，包含所有互動圖表，在瀏覽器中開啟即可查看，效果與本頁分析介面一致。")
+        if st.button("🔄 生成 HTML 報告", use_container_width=True, key="s_html_btn"):
+            with st.spinner("正在生成 HTML 報告…"):
+                try:
+                    html_str = build_student_html_report(agg, insights, s_grade, s_label)
+                    st.session_state["s_html_bytes"] = html_str.encode("utf-8")
+                    st.session_state["s_html_stem"] = f"{s_grade}_{s_label or 'class'}"
+                except Exception as e:
+                    st.error(f"❌ HTML 生成失敗：{e}")
+                    st.exception(e)
+
+        if st.session_state.get("s_html_bytes"):
+            html_stem = st.session_state.get("s_html_stem", "report")
+            st.download_button(
+                "⬇️ 點擊下載 HTML 報告",
+                data=st.session_state["s_html_bytes"],
+                file_name=f"student_report_{html_stem}.html",
+                mime="text/html",
+                use_container_width=True,
+                key="s_html_dl",
+            )
+            st.success(f"✅ HTML 報告已生成 ({len(st.session_state['s_html_bytes']):,} bytes)　— 下載後用瀏覽器開啟即可查看")
 
         st.markdown("---")
         st.markdown("#### 📂 JSON 原始資料")
