@@ -917,28 +917,39 @@ if mode == "📝 學生試卷批量分析（新）":
             # ── Batch mode ────────────────────────────────────────────
             with mode_tab2:
                 total_err = len(students_with_errors)
+                total_perf = len(students_perfect)
+                total_all = total_err + total_perf
+
                 st.info(
-                    f"共 **{total_err}** 位學生有答錯題目。按下按鈕後，AI 會依次為每位學生生成練習題，"
-                    f"完成後可一鍵下載全班練習題 HTML，直接送印。"
+                    f"全班共 **{total_all}** 位學生（**{total_err}** 位有答錯、**{total_perf}** 位全對）。\n\n"
+                    f"按下按鈕後，AI 會一次過為全班生成練習題：答錯的同學生成**弱點針對練習**，"
+                    f"全對的同學生成**鞏固延伸練習**，完成後可一鍵下載全班練習題 HTML，直接送印。"
                 )
 
-                # Show student list
-                with st.expander(f"📋 需要生成練習題的學生名單（{total_err} 人）", expanded=False):
-                    name_rows = [
-                        {
+                # Show combined student list
+                with st.expander(f"📋 全班學生名單（{total_all} 人）", expanded=False):
+                    name_rows = []
+                    for s, w in students_with_errors:
+                        name_rows.append({
                             "學生": s.get("student_name", "未知"),
-                            "答錯題數": len(w),
+                            "類型": f"⚠️ 答錯 {len(w)} 題",
                             "得分率": f"{s.get('percentage', 0):.0f}%",
-                        }
-                        for s, w in students_with_errors
-                    ]
+                            "練習類型": "弱點針對練習",
+                        })
+                    for s, _ in students_perfect:
+                        name_rows.append({
+                            "學生": s.get("student_name", "未知"),
+                            "類型": "✅ 全對",
+                            "得分率": f"{s.get('percentage', 0):.0f}%",
+                            "練習類型": "鞏固延伸練習",
+                        })
                     st.dataframe(pd.DataFrame(name_rows), use_container_width=True, hide_index=True)
 
                 batch_key = "pq_batch_results"
                 batch_running_key = "pq_batch_done"
 
                 if st.button(
-                    f"🚀 為全部 {total_err} 位學生生成練習題（每人 {num_q} 題）",
+                    f"🚀 一鍵為全班 {total_all} 位學生生成練習題（每人 {num_q} 題）",
                     use_container_width=True,
                     type="primary",
                     key="pq_batch_btn",
@@ -949,10 +960,11 @@ if mode == "📝 學生試卷批量分析（新）":
                     pq_analyzer = MathAnalyzer(api_key)
                     errors_log = []
 
+                    # ── Phase 1: error students (weakness practice) ───
                     for idx, (s_data, s_wrong) in enumerate(students_with_errors):
                         sname = s_data.get("student_name", f"學生{idx+1}")
                         status_text.info(
-                            f"⏳ 正在為 **{sname}** 生成練習題… （{idx+1} / {total_err}）"
+                            f"⏳ 正在為 **{sname}** 生成弱點練習題… （{idx+1} / {total_all}）"
                         )
                         try:
                             result = pq_analyzer.generate_practice_questions(
@@ -973,6 +985,7 @@ if mode == "📝 學生試卷批量分析（新）":
                                 )
                             if result.get("parse_error"):
                                 errors_log.append(f"{sname}: AI 回覆格式錯誤（已重試一次）")
+                            result["_gen_type"] = "weakness"
                             batch_results.append(result)
                         except Exception as e:
                             errors_log.append(f"{sname}: {e}")
@@ -980,20 +993,59 @@ if mode == "📝 學生試卷批量分析（新）":
                                 "student_name": sname,
                                 "parse_error": True,
                                 "error": str(e),
+                                "_gen_type": "weakness",
                             })
-                        progress_bar.progress((idx + 1) / total_err)
+                        progress_bar.progress((idx + 1) / total_all)
+
+                    # ── Phase 2: perfect students (consolidation) ─────
+                    for idx2, (s_data, s_qs) in enumerate(students_perfect):
+                        sname = s_data.get("student_name", f"學生{total_err+idx2+1}")
+                        overall_idx = total_err + idx2 + 1
+                        status_text.info(
+                            f"⏳ 正在為 **{sname}** 生成鞏固練習題… （{overall_idx} / {total_all}）"
+                        )
+                        try:
+                            result = pq_analyzer.generate_consolidation_questions(
+                                student_name=sname,
+                                grade=s_grade,
+                                all_questions=s_qs,
+                                num_questions=num_q,
+                                difficulty="進階",
+                            )
+                            if result.get("parse_error"):
+                                result = pq_analyzer.generate_consolidation_questions(
+                                    student_name=sname,
+                                    grade=s_grade,
+                                    all_questions=s_qs,
+                                    num_questions=num_q,
+                                    difficulty="進階",
+                                )
+                            if result.get("parse_error"):
+                                errors_log.append(f"{sname}: AI 回覆格式錯誤（已重試一次）")
+                            result["_gen_type"] = "consolidation"
+                            batch_results.append(result)
+                        except Exception as e:
+                            errors_log.append(f"{sname}: {e}")
+                            batch_results.append({
+                                "student_name": sname,
+                                "parse_error": True,
+                                "error": str(e),
+                                "_gen_type": "consolidation",
+                            })
+                        progress_bar.progress(overall_idx / total_all)
 
                     st.session_state[batch_key] = batch_results
                     st.session_state[batch_running_key] = True
                     n_ok = len([r for r in batch_results if not r.get("parse_error")])
-                    n_fail = total_err - n_ok
+                    n_fail = total_all - n_ok
                     if n_fail:
                         status_text.warning(
-                            f"⚠️ 已完成！成功 {n_ok} 份，失敗 {n_fail} 份（共 {total_err} 位學生）"
+                            f"⚠️ 已完成！成功 {n_ok} 份，失敗 {n_fail} 份（共 {total_all} 位學生）"
                         )
                     else:
                         status_text.success(
-                            f"✅ 已完成全部 {total_err} 位學生的練習題生成！"
+                            f"✅ 已完成全班 {total_all} 位學生的練習題生成！"
+                            f"（{total_err} 份弱點練習 + {total_perf} 份鞏固練習）"
                         )
                     if errors_log:
                         for err in errors_log:
@@ -1003,7 +1055,12 @@ if mode == "📝 學生試卷批量分析（新）":
                 batch_results = st.session_state.get(batch_key, [])
                 if batch_results:
                     ok_results = [r for r in batch_results if not r.get("parse_error")]
-                    st.markdown(f"#### 🖨️ 下載全班練習題（{len(ok_results)} 位學生）")
+                    n_weakness = len([r for r in ok_results if r.get("_gen_type") == "weakness"])
+                    n_consol = len([r for r in ok_results if r.get("_gen_type") == "consolidation"])
+                    st.markdown(
+                        f"#### 🖨️ 下載全班練習題（{len(ok_results)} 位學生："
+                        f"{n_weakness} 份弱點練習 + {n_consol} 份鞏固練習）"
+                    )
                     st.caption(
                         "每位學生獨立一頁 A4。瀏覽器開啟後點「🖨️ 列印全部」即可一次列印全班。"
                     )
@@ -1042,9 +1099,11 @@ if mode == "📝 學生試卷批量分析（新）":
                         sname = r.get("student_name", "學生")
                         qs = r.get("practice_questions", [])
                         ws = r.get("weakness_summary", "")
-                        with st.expander(f"📄 {sname}（{len(qs)} 題）", expanded=False):
+                        gen_type = r.get("_gen_type", "weakness")
+                        type_label = "🌟 鞏固" if gen_type == "consolidation" else "⚠️ 弱點"
+                        with st.expander(f"{type_label} {sname}（{len(qs)} 題）", expanded=False):
                             if ws:
-                                st.info(f"弱點概述：{ws}")
+                                st.info(f"{'練習方向' if gen_type == 'consolidation' else '弱點概述'}：{ws}")
                             for q in qs:
                                 st.markdown(
                                     f"**第 {q.get('question_number')} 題** "
@@ -1052,13 +1111,13 @@ if mode == "📝 學生試卷批量分析（新）":
                                     f"{q.get('question_text', '')[:80]}…"
                                 )
 
-            # ── Perfect-score students: consolidation worksheets ───────
+            # ── Perfect-score students: individual consolidation only ──
             if students_perfect:
                 st.markdown("---")
-                st.markdown("### 🌟 全對學生 — 鞏固延伸練習")
+                st.markdown("### 🌟 全對學生 — 個別鞏固延伸練習")
                 st.caption(
-                    f"以下 **{len(students_perfect)}** 位學生全部答對，"
-                    "AI 會為他們生成鞏固延伸練習題，深化已掌握的知識。"
+                    f"以下 **{len(students_perfect)}** 位學生全部答對。"
+                    "如需個別查看或生成，可在此選擇；如需全班批量生成，請使用上方「📋 批量生成全班」分頁。"
                 )
 
                 perf_c1, perf_c2 = st.columns(2)
@@ -1067,208 +1126,96 @@ if mode == "📝 學生試卷批量分析（新）":
                 with perf_c2:
                     perf_diff = st.selectbox("難度", ["適中", "進階"], index=1, key="perf_diff")
 
-                perf_tab1, perf_tab2 = st.tabs(["👤 個別生成", "📋 批量生成"])
+                perf_options = {
+                    f"{s.get('student_name', '未知')}　（全對 ✅，得分率 {s.get('percentage', 0):.0f}%）": i
+                    for i, (s, _) in enumerate(students_perfect)
+                }
+                perf_selected = st.selectbox(
+                    "選擇學生", options=list(perf_options.keys()), key="perf_student_sel"
+                )
+                perf_idx = perf_options[perf_selected]
+                perf_student, perf_qs = students_perfect[perf_idx]
+                perf_name = perf_student.get("student_name", "未知")
 
-                # ── Individual perfect student ─────────────────────────
-                with perf_tab1:
-                    perf_options = {
-                        f"{s.get('student_name', '未知')}　（全對 ✅，得分率 {s.get('percentage', 0):.0f}%）": i
-                        for i, (s, _) in enumerate(students_perfect)
-                    }
-                    perf_selected = st.selectbox(
-                        "選擇學生", options=list(perf_options.keys()), key="perf_student_sel"
-                    )
-                    perf_idx = perf_options[perf_selected]
-                    perf_student, perf_qs = students_perfect[perf_idx]
-                    perf_name = perf_student.get("student_name", "未知")
+                perf_state_key = f"perf_result_{perf_name}"
 
-                    perf_state_key = f"perf_result_{perf_name}"
-
-                    if st.button(
-                        f"🌟 為 {perf_name} 生成 {perf_num_q} 道鞏固練習題",
-                        use_container_width=True,
-                        key="perf_gen_btn",
-                    ):
-                        with st.spinner(f"AI 正在為 {perf_name} 設計鞏固練習題…"):
-                            try:
-                                perf_analyzer = MathAnalyzer(api_key)
-                                perf_result = perf_analyzer.generate_consolidation_questions(
-                                    student_name=perf_name,
-                                    grade=s_grade,
-                                    all_questions=perf_qs,
-                                    num_questions=perf_num_q,
-                                    difficulty=perf_diff,
-                                )
-                                st.session_state[perf_state_key] = perf_result
-                            except Exception as e:
-                                st.error(f"❌ 生成失敗：{e}")
-
-                    perf_result = st.session_state.get(perf_state_key)
-                    if perf_result:
-                        st.markdown("---")
-                        ws = perf_result.get("weakness_summary", "")
-                        if ws:
-                            st.success(f"**📌 練習方向：** {ws}")
-
-                        questions = perf_result.get("practice_questions", [])
-                        for q in questions:
-                            qn = q.get("question_number", "")
-                            qtype = q.get("question_type", "")
-                            target = q.get("targeted_weakness", "")
-                            with st.expander(
-                                f"第 {qn} 題（{qtype}）— 鞏固：{target}", expanded=True
-                            ):
-                                st.markdown(
-                                    f"**範疇：** {q.get('strand', '')}　|　**主題：** {q.get('topic', '')}"
-                                )
-                                st.markdown("---")
-                                st.markdown(f"**📖 題目：**\n\n{q.get('question_text', '')}")
-                                hint = q.get("hints", "")
-                                if hint:
-                                    st.caption(f"💡 提示：{hint}")
-                                with st.expander("🔑 查看答案及解題步驟", expanded=False):
-                                    st.markdown(f"**答案：** {q.get('answer', '')}")
-                                    steps = q.get("solution_steps", [])
-                                    if steps:
-                                        st.markdown("**解題步驟：**")
-                                        for si, step in enumerate(steps, 1):
-                                            st.markdown(f"{si}. {step}")
-
-                        st.markdown("---")
-                        st.markdown("#### 🖨️ 下載鞏固練習題")
-                        dl_p1, dl_p2 = st.columns(2)
-                        with dl_p1:
-                            html_s = build_practice_worksheets_html(
-                                [perf_result], grade=s_grade, show_answers=False
+                if st.button(
+                    f"🌟 為 {perf_name} 生成 {perf_num_q} 道鞏固練習題",
+                    use_container_width=True,
+                    key="perf_gen_btn",
+                ):
+                    with st.spinner(f"AI 正在為 {perf_name} 設計鞏固練習題…"):
+                        try:
+                            perf_analyzer = MathAnalyzer(api_key)
+                            perf_result = perf_analyzer.generate_consolidation_questions(
+                                student_name=perf_name,
+                                grade=s_grade,
+                                all_questions=perf_qs,
+                                num_questions=perf_num_q,
+                                difficulty=perf_diff,
                             )
-                            st.download_button(
-                                f"📄 學生版（A4，無答案）",
-                                data=html_s.encode("utf-8"),
-                                file_name=f"鞏固練習_{perf_name}_{s_grade}_學生版.html",
-                                mime="text/html",
-                                key="perf_dl_student",
-                                use_container_width=True,
-                            )
-                        with dl_p2:
-                            html_t = build_practice_worksheets_html(
-                                [perf_result], grade=s_grade, show_answers=True
-                            )
-                            st.download_button(
-                                f"📋 老師版（含答案）",
-                                data=html_t.encode("utf-8"),
-                                file_name=f"鞏固練習_{perf_name}_{s_grade}_老師版.html",
-                                mime="text/html",
-                                key="perf_dl_teacher",
-                                use_container_width=True,
-                            )
+                            st.session_state[perf_state_key] = perf_result
+                        except Exception as e:
+                            st.error(f"❌ 生成失敗：{e}")
 
-                # ── Batch perfect students ─────────────────────────────
-                with perf_tab2:
-                    total_perf = len(students_perfect)
-                    st.info(
-                        f"共 **{total_perf}** 位全對學生。按下按鈕後，AI 會依次為每位學生生成鞏固練習題。"
-                    )
+                perf_result = st.session_state.get(perf_state_key)
+                if perf_result:
+                    st.markdown("---")
+                    ws = perf_result.get("weakness_summary", "")
+                    if ws:
+                        st.success(f"**📌 練習方向：** {ws}")
 
-                    with st.expander(f"📋 全對學生名單（{total_perf} 人）", expanded=False):
-                        perf_name_rows = [
-                            {
-                                "學生": s.get("student_name", "未知"),
-                                "得分率": f"{s.get('percentage', 0):.0f}%",
-                            }
-                            for s, _ in students_perfect
-                        ]
-                        st.dataframe(pd.DataFrame(perf_name_rows), use_container_width=True, hide_index=True)
+                    questions = perf_result.get("practice_questions", [])
+                    for q in questions:
+                        qn = q.get("question_number", "")
+                        qtype = q.get("question_type", "")
+                        target = q.get("targeted_weakness", "")
+                        with st.expander(
+                            f"第 {qn} 題（{qtype}）— 鞏固：{target}", expanded=True
+                        ):
+                            st.markdown(
+                                f"**範疇：** {q.get('strand', '')}　|　**主題：** {q.get('topic', '')}"
+                            )
+                            st.markdown("---")
+                            st.markdown(f"**📖 題目：**\n\n{q.get('question_text', '')}")
+                            hint = q.get("hints", "")
+                            if hint:
+                                st.caption(f"💡 提示：{hint}")
+                            with st.expander("🔑 查看答案及解題步驟", expanded=False):
+                                st.markdown(f"**答案：** {q.get('answer', '')}")
+                                steps = q.get("solution_steps", [])
+                                if steps:
+                                    st.markdown("**解題步驟：**")
+                                    for si, step in enumerate(steps, 1):
+                                        st.markdown(f"{si}. {step}")
 
-                    perf_batch_key = "perf_batch_results"
-
-                    if st.button(
-                        f"🚀 為全部 {total_perf} 位全對學生生成鞏固練習題（每人 {perf_num_q} 題）",
-                        use_container_width=True,
-                        type="primary",
-                        key="perf_batch_btn",
-                    ):
-                        perf_batch_results = []
-                        perf_progress = st.progress(0)
-                        perf_status = st.empty()
-                        perf_analyzer = MathAnalyzer(api_key)
-                        perf_errors = []
-
-                        for idx, (s_data, s_qs) in enumerate(students_perfect):
-                            sname = s_data.get("student_name", f"學生{idx+1}")
-                            perf_status.info(
-                                f"⏳ 正在為 **{sname}** 生成鞏固練習題… （{idx+1} / {total_perf}）"
-                            )
-                            try:
-                                result = perf_analyzer.generate_consolidation_questions(
-                                    student_name=sname,
-                                    grade=s_grade,
-                                    all_questions=s_qs,
-                                    num_questions=perf_num_q,
-                                    difficulty=perf_diff,
-                                )
-                                # Retry once if JSON parsing failed
-                                if result.get("parse_error"):
-                                    result = perf_analyzer.generate_consolidation_questions(
-                                        student_name=sname,
-                                        grade=s_grade,
-                                        all_questions=s_qs,
-                                        num_questions=perf_num_q,
-                                        difficulty=perf_diff,
-                                    )
-                                if result.get("parse_error"):
-                                    perf_errors.append(f"{sname}: AI 回覆格式錯誤（已重試一次）")
-                                perf_batch_results.append(result)
-                            except Exception as e:
-                                perf_errors.append(f"{sname}: {e}")
-                                perf_batch_results.append({
-                                    "student_name": sname,
-                                    "parse_error": True,
-                                    "error": str(e),
-                                })
-                            perf_progress.progress((idx + 1) / total_perf)
-
-                        st.session_state[perf_batch_key] = perf_batch_results
-                        n_ok_perf = len([r for r in perf_batch_results if not r.get("parse_error")])
-                        n_fail_perf = total_perf - n_ok_perf
-                        if n_fail_perf:
-                            perf_status.warning(
-                                f"⚠️ 已完成！成功 {n_ok_perf} 份，失敗 {n_fail_perf} 份（共 {total_perf} 位學生）"
-                            )
-                        else:
-                            perf_status.success(
-                                f"✅ 已完成全部 {total_perf} 位全對學生的鞏固練習題！"
-                            )
-
-                    perf_batch_results = st.session_state.get(perf_batch_key, [])
-                    if perf_batch_results:
-                        ok_perf = [r for r in perf_batch_results if not r.get("parse_error")]
-                        st.markdown(f"#### 🖨️ 下載全對學生鞏固練習題（{len(ok_perf)} 位學生）")
-                        dl_pb1, dl_pb2 = st.columns(2)
-                        with dl_pb1:
-                            html_all_s = build_practice_worksheets_html(
-                                ok_perf, grade=s_grade, show_answers=False
-                            )
-                            st.download_button(
-                                f"📄 全部學生版（{len(ok_perf)} 頁，無答案）",
-                                data=html_all_s.encode("utf-8"),
-                                file_name=f"全對鞏固練習_{s_grade}_學生版.html",
-                                mime="text/html",
-                                key="perf_batch_dl_student",
-                                use_container_width=True,
-                                type="primary",
-                            )
-                        with dl_pb2:
-                            html_all_t = build_practice_worksheets_html(
-                                ok_perf, grade=s_grade, show_answers=True
-                            )
-                            st.download_button(
-                                f"📋 全部老師版（{len(ok_perf)} 頁，含答案）",
-                                data=html_all_t.encode("utf-8"),
-                                file_name=f"全對鞏固練習_{s_grade}_老師版.html",
-                                mime="text/html",
-                                key="perf_batch_dl_teacher",
-                                use_container_width=True,
-                            )
+                    st.markdown("---")
+                    st.markdown("#### 🖨️ 下載鞏固練習題")
+                    dl_p1, dl_p2 = st.columns(2)
+                    with dl_p1:
+                        html_s = build_practice_worksheets_html(
+                            [perf_result], grade=s_grade, show_answers=False
+                        )
+                        st.download_button(
+                            f"📄 學生版（A4，無答案）",
+                            data=html_s.encode("utf-8"),
+                            file_name=f"鞏固練習_{perf_name}_{s_grade}_學生版.html",
+                            mime="text/html",
+                            key="perf_dl_student",
+                            use_container_width=True,
+                        )
+                    with dl_p2:
+                        html_t = build_practice_worksheets_html(
+                            [perf_result], grade=s_grade, show_answers=True
+                        )
+                        st.download_button(
+                            f"📋 老師版（含答案）",
+                            data=html_t.encode("utf-8"),
+                            file_name=f"鞏固練習_{perf_name}_{s_grade}_老師版.html",
+                            mime="text/html",
+                            key="perf_dl_teacher",
+                            use_container_width=True,
+                        )
 
     # ── Tab 8: Export ─────────────────────────────────────────────────
     with rtabs[8]:
