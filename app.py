@@ -962,6 +962,17 @@ if mode == "📝 學生試卷批量分析（新）":
                                 num_questions=num_q,
                                 difficulty=difficulty,
                             )
+                            # Retry once if JSON parsing failed
+                            if result.get("parse_error"):
+                                result = pq_analyzer.generate_practice_questions(
+                                    student_name=sname,
+                                    grade=s_grade,
+                                    weak_questions=s_wrong,
+                                    num_questions=num_q,
+                                    difficulty=difficulty,
+                                )
+                            if result.get("parse_error"):
+                                errors_log.append(f"{sname}: AI 回覆格式錯誤（已重試一次）")
                             batch_results.append(result)
                         except Exception as e:
                             errors_log.append(f"{sname}: {e}")
@@ -974,10 +985,16 @@ if mode == "📝 學生試卷批量分析（新）":
 
                     st.session_state[batch_key] = batch_results
                     st.session_state[batch_running_key] = True
-                    status_text.success(
-                        f"✅ 已完成全部 {total_err} 位學生的練習題生成！"
-                        + (f"（{len(errors_log)} 位生成失敗）" if errors_log else "")
-                    )
+                    n_ok = len([r for r in batch_results if not r.get("parse_error")])
+                    n_fail = total_err - n_ok
+                    if n_fail:
+                        status_text.warning(
+                            f"⚠️ 已完成！成功 {n_ok} 份，失敗 {n_fail} 份（共 {total_err} 位學生）"
+                        )
+                    else:
+                        status_text.success(
+                            f"✅ 已完成全部 {total_err} 位學生的練習題生成！"
+                        )
                     if errors_log:
                         for err in errors_log:
                             st.warning(f"⚠️ {err}")
@@ -1189,6 +1206,17 @@ if mode == "📝 學生試卷批量分析（新）":
                                     num_questions=perf_num_q,
                                     difficulty=perf_diff,
                                 )
+                                # Retry once if JSON parsing failed
+                                if result.get("parse_error"):
+                                    result = perf_analyzer.generate_consolidation_questions(
+                                        student_name=sname,
+                                        grade=s_grade,
+                                        all_questions=s_qs,
+                                        num_questions=perf_num_q,
+                                        difficulty=perf_diff,
+                                    )
+                                if result.get("parse_error"):
+                                    perf_errors.append(f"{sname}: AI 回覆格式錯誤（已重試一次）")
                                 perf_batch_results.append(result)
                             except Exception as e:
                                 perf_errors.append(f"{sname}: {e}")
@@ -1200,10 +1228,16 @@ if mode == "📝 學生試卷批量分析（新）":
                             perf_progress.progress((idx + 1) / total_perf)
 
                         st.session_state[perf_batch_key] = perf_batch_results
-                        perf_status.success(
-                            f"✅ 已完成全部 {total_perf} 位全對學生的鞏固練習題！"
-                            + (f"（{len(perf_errors)} 位生成失敗）" if perf_errors else "")
-                        )
+                        n_ok_perf = len([r for r in perf_batch_results if not r.get("parse_error")])
+                        n_fail_perf = total_perf - n_ok_perf
+                        if n_fail_perf:
+                            perf_status.warning(
+                                f"⚠️ 已完成！成功 {n_ok_perf} 份，失敗 {n_fail_perf} 份（共 {total_perf} 位學生）"
+                            )
+                        else:
+                            perf_status.success(
+                                f"✅ 已完成全部 {total_perf} 位全對學生的鞏固練習題！"
+                            )
 
                     perf_batch_results = st.session_state.get(perf_batch_key, [])
                     if perf_batch_results:
