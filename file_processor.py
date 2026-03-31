@@ -30,6 +30,37 @@ except ImportError:
 # How many pages to bundle per vision-API call (Qwen VL handles up to ~10 images)
 VISION_BATCH_SIZE = 6
 
+# Qwen API limit: 10 MB per data-uri item.  Keep a safety margin.
+_MAX_BASE64_BYTES = 9 * 1024 * 1024  # 9 MB
+
+
+def _compress_image_b64(
+    png_bytes: bytes,
+    max_b64_bytes: int = _MAX_BASE64_BYTES,
+) -> str:
+    """Return a base64 string guaranteed to stay under the API data-uri limit.
+
+    Strategy: try the original PNG first; if too large, re-encode as JPEG
+    with progressively lower quality and smaller dimensions.
+    """
+    b64 = base64.b64encode(png_bytes).decode()
+    if len(b64) <= max_b64_bytes:
+        return b64
+
+    img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+    max_dim = 2048
+    for quality in (85, 70, 50, 30):
+        thumb = img.copy()
+        thumb.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        thumb.save(buf, format="JPEG", quality=quality, optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        if len(b64) <= max_b64_bytes:
+            return b64
+        max_dim = int(max_dim * 0.8)
+    # Last resort: return whatever we have (smallest attempt)
+    return b64
+
 
 class FileProcessor:
     """Process uploaded files into structured data for AI analysis."""
@@ -117,7 +148,7 @@ class FileProcessor:
                 texts.append(f"【第 {page_num + 1} / {total} 頁】\n{page.get_text()}")
                 mat = fitz.Matrix(self.IMAGE_DPI_SCALE, self.IMAGE_DPI_SCALE)
                 pix = page.get_pixmap(matrix=mat)
-                images.append(base64.b64encode(pix.tobytes("png")).decode())
+                images.append(_compress_image_b64(pix.tobytes("png")))
             doc.close()
             result["text_summary"] = "\n\n".join(texts)
             result["images"] = images
@@ -164,7 +195,7 @@ class FileProcessor:
             for page_num, page in enumerate(doc):
                 mat = fitz.Matrix(self.IMAGE_DPI_SCALE, self.IMAGE_DPI_SCALE)
                 pix = page.get_pixmap(matrix=mat)
-                images.append(base64.b64encode(pix.tobytes("png")).decode())
+                images.append(_compress_image_b64(pix.tobytes("png")))
                 texts.append(f"【第 {page_num + 1} 頁】\n{page.get_text()}")
             doc.close()
             result["images"] = images
@@ -193,7 +224,7 @@ class FileProcessor:
 
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode()
+        b64 = _compress_image_b64(buf.getvalue())
 
         return {"type": "image", "images": [b64], "text": "", "page_count": 1}
 
@@ -227,7 +258,7 @@ def split_student_papers(pdf_bytes: bytes, pages_per_student: int) -> List[Dict]
             page = doc[page_num]
             mat = fitz.Matrix(scale, scale)
             pix = page.get_pixmap(matrix=mat)
-            images.append(base64.b64encode(pix.tobytes("png")).decode())
+            images.append(_compress_image_b64(pix.tobytes("png")))
         students.append({
             "student_index": i + 1,
             "page_range": (start + 1, end),

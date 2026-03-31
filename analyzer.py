@@ -820,9 +820,11 @@ class MathAnalyzer:
 
         content = []
         for b64 in images_b64:
+            # Auto-detect: JPEG starts with /9j in base64, PNG with iVBOR
+            mime = "image/jpeg" if b64.startswith("/9j") else "image/png"
             content.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{b64}"},
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
             })
         content.append({"type": "text", "text": prompt})
         messages.append({"role": "user", "content": content})
