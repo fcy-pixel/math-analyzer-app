@@ -30,8 +30,8 @@ except ImportError:
 # How many pages to bundle per vision-API call (Qwen VL handles up to ~10 images)
 VISION_BATCH_SIZE = 6
 
-# Qwen API limit: 10 MB per data-uri item.  Keep a safety margin.
-_MAX_BASE64_BYTES = 9 * 1024 * 1024  # 9 MB
+# Qwen API limit: 10 MB per data-uri item.  Keep a generous safety margin.
+_MAX_BASE64_BYTES = 7 * 1024 * 1024  # 7 MB (API max = 10 MB)
 
 
 def _compress_image_b64(
@@ -47,9 +47,12 @@ def _compress_image_b64(
     if len(b64) <= max_b64_bytes:
         return b64
 
+    # Open and get actual dimensions as starting point
     img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-    max_dim = 2048
-    for quality in (85, 70, 50, 30):
+    w, h = img.size
+    max_dim = max(w, h)
+
+    for quality in (80, 65, 50, 35, 20):
         thumb = img.copy()
         thumb.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
         buf = io.BytesIO()
@@ -57,7 +60,8 @@ def _compress_image_b64(
         b64 = base64.b64encode(buf.getvalue()).decode()
         if len(b64) <= max_b64_bytes:
             return b64
-        max_dim = int(max_dim * 0.8)
+        # Shrink dimensions by 25% each iteration
+        max_dim = int(max_dim * 0.75)
     # Last resort: return whatever we have (smallest attempt)
     return b64
 
@@ -65,8 +69,8 @@ def _compress_image_b64(
 class FileProcessor:
     """Process uploaded files into structured data for AI analysis."""
 
-    IMAGE_DPI_SCALE = 1.8   # Render scale (~130 DPI) — good quality, manageable size
-    MAX_IMAGE_SIZE = (2048, 2048)
+    IMAGE_DPI_SCALE = 1.5   # Render scale (~108 DPI) — good quality, manageable size
+    MAX_IMAGE_SIZE = (1600, 1600)
 
     # ------------------------------------------------------------------
     # Public API
