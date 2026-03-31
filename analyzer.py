@@ -804,6 +804,74 @@ class MathAnalyzer:
         )
         return self._parse_json(raw)
 
+    # ------------------------------------------------------------------
+    # 8. Generate consolidation questions for students who scored perfectly
+    # ------------------------------------------------------------------
+
+    def generate_consolidation_questions(
+        self,
+        student_name: str,
+        grade: str,
+        all_questions: List[Dict],
+        num_questions: int = 5,
+        difficulty: str = "進階",
+    ) -> Dict:
+        """
+        Generate consolidation / enrichment questions for a student who
+        answered all questions correctly, to reinforce and extend learning.
+        """
+        curriculum_info = get_grade_curriculum(grade)
+
+        # Summarise the topics the student already mastered
+        topics_summary = json.dumps(all_questions, ensure_ascii=False, indent=2)
+
+        prompt = f"""你是一位經驗豐富的香港小學數學科老師，正在為 {grade} 年級全部答對的優秀學生 {student_name} 設計鞏固及延伸練習題。
+
+以下是該學生在測驗中全部答對的題目（代表已掌握的範疇）：
+
+{topics_summary}
+
+香港 {grade} 年級數學課程綱要：
+{curriculum_info}
+
+該學生已全部答對，請為其設計 {num_questions} 道鞏固延伸練習題，要求：
+1. 題目針對學生已掌握的範疇，但提高難度或變換題型，鞏固已有知識
+2. 包含一些高階思維題（分析、綜合、評鑑）和跨範疇綜合應用題
+3. 題目難度：{difficulty}（在該年級範圍內，偏向挑戰性）
+4. 題目類型多樣化（計算題、應用題、填充題、開放題等）
+5. 每道題附有詳細解題步驟和答案
+6. 題目要貼近香港小學數學課程和日常生活情境
+
+只輸出純JSON（不加markdown代碼塊）：
+{{
+  "student_name": "{student_name}",
+  "grade": "{grade}",
+  "weakness_summary": "該學生已全部答對，以下為鞏固延伸練習——針對已掌握範疇進行深化訓練",
+  "practice_questions": [
+    {{
+      "question_number": 1,
+      "targeted_weakness": "鞏固範疇（對應原題涉及的知識點）",
+      "strand": "課程範疇",
+      "topic": "具體主題",
+      "question_type": "題目類型（計算題/應用題/填充題/選擇題/開放題）",
+      "question_text": "完整題目文字",
+      "hints": "給學生的提示（選填）",
+      "solution_steps": ["步驟1", "步驟2", "步驟3"],
+      "answer": "正確答案",
+      "explanation": "這道題如何鞏固或延伸該範疇的知識"
+    }}
+  ],
+  "study_tips": ["延伸學習建議1", "延伸學習建議2", "延伸學習建議3"]
+}}"""
+
+        raw = self._text(
+            prompt,
+            "你是資深香港小學數學教師，精通因材施教、為優秀學生設計鞏固延伸練習題。"
+            "你熟悉香港課程發展議會《數學課程指引》（2017），"
+            "能設計具挑戰性且符合課程要求的數學練習題。",
+        )
+        return self._parse_json(raw)
+
     def _text(self, prompt: str, system_msg: str = "") -> str:
         messages = []
         if system_msg:
